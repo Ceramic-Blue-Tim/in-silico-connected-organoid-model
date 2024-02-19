@@ -1,55 +1,60 @@
-% @title      Main script for in silico organoid simulation
-% @file       sim_organoid.m
+% @title      Main script for parameters sweep
+% @file       sweep_sim_organoid.m
 % @author     Romain Beaubois
-% @date       14 Jan 2021
-% @version    0.1
+% @date       04 Oct 2022
 % @copyright
-% SPDX-FileCopyrightText: © 2021 Romain Beaubois <refbeaubois@yahoo.com>
+% SPDX-FileCopyrightText: © 2022 Romain Beaubois <refbeaubois@yahoo.com>
 % SPDX-License-Identifier: GPL-3.0-or-later
 %
-% @brief Main script for in silico organoid simulation
+% @brief Main script for in silico organoid sweep parameters
 % 
 % @details
-% > **06 Jan 2021** : file creation (RB)
-% > **10 Jan 2021** : add Hill synapses (RB)
-% > **14 Jan 2021** : add optogenetics stimulation (RB)
-% > **26 Sep 2022** : adapted for large parameters sweeps on remote host (RB)
+% > **04 Oct 2022** : file creation (RB)
+
+function [] = sweep_sim_organoid(params)
+%% Fetch params
+
+sw_type             = params.sw_type;
+dist_orgs_factor    = params.dist_orgs_factor;
+sw_pcon_in          = params.sw_pcon_in;
+sw_pcon_out         = params.sw_pcon_out;
+sw_wsyn_exc_in      = params.sw_wsyn_exc_in;
+sw_wsyn_inh_in      = params.sw_wsyn_inh_in;
+sw_wsyn_exc_out     = params.sw_wsyn_exc_out;
+sw_wsyn_inh_out     = params.sw_wsyn_inh_out;
 
 %% Remove data?
-    clc;    
-    clear all;
-    close all;
     tic;
 
 %% Add required folders and subfolders to path
-    addpath(genpath('Network_V2'));
-    
+    addpath(genpath('~/Documents/Organoid-Modeling/matlab/Network_V2'));
+
 %% Parameters ####################################################################################
     % Data saving folder
-    dirpath_data    = "./data";
+    dirpath_data    = "~/Documents/Organoid-Modeling/matlab/data";
     mkdir(dirpath_data);
     dirpath_save    = dirpath_data + filesep + "sim";
     mkdir(dirpath_save);
-    fname_save      = "sweep1";
+    fname_save      = sprintf("%s_pi=%.2f_po=%.2f_wei=%.2f_wii=%2.f_weo=%.2f_wio=%.2f" , sw_type, sw_pcon_in, sw_pcon_out, sw_wsyn_exc_in, sw_wsyn_inh_in, sw_wsyn_exc_out, sw_wsyn_inh_out);
     fpath_save      = dirpath_save + filesep + fname_save + ".mat" ;
 
     % Time
         dt              = 2^-5;                 % ms - Time step
-        sim_time        = 1;                  % ms - Simulation time
+        sim_time        = 5*60*1e3;             % ms - Simulation time
 
     % Geometry
         org_diam        = 138.25;               % um | 100 neurons->138.25 | 10 neurons->35.25
         neur_diam       = 15;                   % um - Average diameter of a neuron
-        dist_orgs       = org_diam;             % um - Distance between centers of organoids
+        dist_orgs       = dist_orgs_factor*org_diam; % um - Distance between centers of organoids
         ccx             = [0 dist_orgs];        % x cood of organoid center [org1 org2]
         ccy             = [0 0];                % y cood of organoid center [org1 org2]
         n_inh           = [10 10];              % number of ihnibitory neurons [org1 org2]
     
     % Synaptic connection parameters
-        pcon_in         = 0.05;                 % connection probability inside org
-        pcon_out        = 0.03;                 % connection probability outside org
-        wsyn_gexc       = [0.3 0.3 0.3 0.3];% synaptic current weight for exc synapses in groups[G1 G2 G1->G2 G2->G1]
-        wsyn_ginh       = [0.3 0.3 0.3 0.3];% synaptic current weight for inh synapses in groups[G1 G2 G1->G2 G2->G1]
+        pcon_in         = sw_pcon_in;    % connection probability inside org
+        pcon_out        = sw_pcon_out;                 % connection probability outside org
+        wsyn_gexc       = [sw_wsyn_exc_in sw_wsyn_exc_in sw_wsyn_exc_out sw_wsyn_exc_out];    % synaptic current weight for exc synapses in groups[G1 G2 G1->G2 G2->G1]
+        wsyn_ginh       = [sw_wsyn_inh_in sw_wsyn_inh_in sw_wsyn_inh_out sw_wsyn_inh_out];    % synaptic current weight for inh synapses in groups[G1 G2 G1->G2 G2->G1]
         wstim           = [0.63e-6  0.3e-6];    % stim current weight  [FS RS]
         offset          = [0.22e-6  0.60e-6];   % stim current offset  [FS RS]
         org_stim_indep  = true;                 % independant stimulation current for organoids otherwise identical
@@ -102,8 +107,8 @@
         org_struct = struct(...
             'org1',             'dist',         ...
             'org2',             'dist',           ...
-            'org1_to_org2',     'connectoid',   ...
-            'org2_to_org1',     'connectoid',   ...
+            'org1_to_org2',     sw_type,        ...
+            'org2_to_org1',     sw_type,        ...
             'in_org_syntype',   'DestexheFast',     ...
             'out_org_syntype',  'DestexheFast',     ...
             'load_wsyn',        false,          ...
@@ -260,9 +265,9 @@
 %% Initialize network
 
     % Initialize parameters
-    V           = zeros(MAX_N, l_t);
-    I           = zeros(MAX_N, l_t, 5);
-    Istim       = zeros(MAX_N, l_t);
+    Vprev       = zeros(MAX_N, 1);
+    Vnew        = zeros(MAX_N, 1);
+    Inew        = zeros(MAX_N, 5);
     offset_t    = zeros(MAX_N, 1);
     wstim_t     = zeros(MAX_N, 1);
     Istim_pre   = zeros(MAX_N, 1);
@@ -281,16 +286,16 @@
         N(i) = PospischilNeuralNetworkV2( nt(i), dt, GVal, EVal, IonChanInit, Hillsyn_param, opto_stim, Cmem, TauMax, Sm, Vtraub, MAX_N);
 
         if strcmp(nt(i), 'FS')
-            Istim(i) = kFS_simpl_lin03(Imax);
+            Istimprev(i) = kFS_simpl_lin03(Imax);
             offset_t(i) = offset(1);
             wstim_t(i)  = wstim(1);
         elseif strcmp(nt(i), 'RS')
-            Istim(i) = 0.3*Imax;
+            Istimprev(i) = 0.3*Imax;
             offset_t(i) = offset(2);
             wstim_t(i)  = wstim(2);            
         end
 
-        V(i,1)      = Vinit;
+        Vprev(i) = Vinit;
     end
     
     % Plot stim current generated
@@ -305,7 +310,7 @@
 %     plot(t,IstimN2)
 
 %% Raster plot detection
-    event       = zeros(MAX_N, l_t);
+    event       = single(zeros(MAX_N, l_t));
     detect      = zeros(MAX_N, 1);
     ev_count    = zeros(MAX_N, 1);
     threshold   = 0; % mV
@@ -316,7 +321,7 @@
         for j = 1:MAX_N
 
             % Spike detection
-            [ev_tabnew, fsm_spk_ev, nb_spk, last_ev] = spk_dtc_Hillsyn(j, V(j,i), i*dt, ev_tabnew, fsm_spk_ev, nb_spk, last_ev, max_spk, Hillsyn_th);
+            [ev_tabnew, fsm_spk_ev, nb_spk, last_ev] = spk_dtc_Hillsyn(j, Vprev(j), i*dt, ev_tabnew, fsm_spk_ev, nb_spk, last_ev, max_spk, Hillsyn_th);
 
             % Noisy stimulation current
             if j < ORG2_START
@@ -362,170 +367,24 @@
             end
 
             % Calculation
-            [N(j), V(j,i+1), I(j,i,:)] = N(j).PospischilCalc(V(:,i), IstimN, S_con, opto_stim, opto_stim_pulse(i), A_con, j, wsyn, i*dt, ev_tab);
+            [N(j), Vnew(j), Inew(j, :)] = N(j).PospischilCalc(Vprev, IstimN, S_con, opto_stim, opto_stim_pulse(i), A_con, j, wsyn, i*dt, ev_tab);
             
             % Detection for raster plot
-            if (V(j,i+1) > threshold) && (detect(j)==0)
+            if (Vnew(j) > threshold) && (detect(j)==0)
                 ev_count(j)             = ev_count(j) + 1;
                 event(j, ev_count(j))   = i+1;
                 detect(j)               = 1;
-            elseif (V(j,i+1) < threshold) && (detect(j)==1)
+            elseif (Vnew(j) < threshold) && (detect(j)==1)
                 detect(j) = 0;
             end  
         end
+        Vprev = Vnew;
         ev_tab = ev_tabnew;
-        LoadSim(i, l_t);        
+        LoadSim(i, l_t);     
     end
 
 %% Save data
-save(fpath_save, 'param_struct', 'ev_count')
+save(fpath_save, 'S_con', 'wsyn', 'nt', 'x', 'y', 'param_struct', 'ev_count', 'event')
 
-%% Print
-%     figure('Name','Membrane voltage','NumberTitle','off');
-%     for i = 1:MAX_N
-%         % subplot(MAX_N/2,2,i);
-%         hold on
-%         plot(t, V(i,:));
-%         title(sprintf("V_{mem} neuron %d", i));
-%         ylabel('Amplitude (mV)');
-%         xlabel('Time (ms)');
-%         ll{i} = sprintf('N%d',i);
-%         legend(ll);
-%         % ylim([-120 60]);
-%     end   
-
-    
-    
-%% Raster plot
-    % Synapse codage
-    NONE            = 000;  % No synapse
-    AMPA            = 001;  % Excitatoty synapse
-    GABAa           = 011;  % Ihnibitory synapse
-    exc_Hill        = 101;  % Short-term plasticity synapse
-    inh_Hill        = 110;  % Short-term plasticity synapse
-    figure('Name','Raster plot','NumberTitle','off');
-    
-    %              ORG1     ORG2
-    colors_inh  = {'blue';  'black'};
-    colors_exc  = {'red';   'green'};
-
-    % Article layout
-    if article_rp
-        for z = 1:2
-            high_c  = -1;
-            low_c   = -1;
-
-            for j = GX_id{z}.pre
-                if strcmp(nt(j),'FS')
-                    d_color = colors_inh{z};
-                    high_c  = high_c + 1;
-                    ny      = pre_id{z}(2) - high_c;
-                elseif strcmp(nt(j),'RS')
-                    d_color = colors_exc{z};
-                    low_c   = low_c + 1;
-                    ny      = pre_id{z}(1) + low_c;
-                end
-                
-                for i = 1:ev_count(j)
-                    plot(event(j,i)/(dt*1e6), ny, sprintf('.%s',d_color));
-                    hold on
-                end
-            end
-        end
-
-        title('Raster plot : FS [blue black] | RS [red green]')
-        ylabel('Neuron index');
-        xlabel('Time (s)');
-    else
-        for j = 1:MAX_N
-            if j < ORG2_START
-                if strcmp(nt(j),'FS')
-                    color = colors_inh{1};
-                else
-                    color = colors_exc{1};
-                end
-            else
-                if strcmp(nt(j),'FS')
-                    color = colors_inh{2};
-                else
-                    color = colors_exc{2};
-                end            
-            end
-            
-            for i = 1:ev_count(j)
-                plot(event(j,i)/(dt*1e6), j, sprintf('.%s',color));
-                hold on
-            end
-        end
-    end
-    
-    % Print stim
-    yyaxis left
-    ylim([-1 201])
-    plot(t*1e-3, MAX_N*opto_stim_pulse, '-.m')
-%     set(gca,'color', 'none')
-%     set(gca,'XTick',[],'YTick',[]);
-%     set(gca,'XTickLabel',[],'YTickLabel');
-%     xticks([0.1])
-
-
-%% Connectivity print
-    % Labels
-    GX_labels = {'org1' 'org2' 'org1 to org2' 'org2 to org1'};
-    ftitle = sprintf('Synaptic connectivity');
-    figure('Name',ftitle,'NumberTitle','off');
-    stitle = sprintf('%s : FS->blue | RS->red', ftitle);
-    sgtitle(stitle);
-
-    % Draw neurons
-    for z = 1:4
-        subplot(2,2,z);
-
-        for pre = GX_id{z}.pre
-            if strcmp(nt(pre),'FS')
-                s = scatter(x(pre),y(pre),'blue','filled');
-                s.MarkerEdgeColor = 'black';
-            else
-                s = scatter(x(pre),y(pre),'red','filled');
-                s.MarkerEdgeColor = 'black';
-            end
-            hold on
-        end
-
-        if z>2
-            for post = GX_id{z}.post
-                if strcmp(nt(post),'FS')
-                    s = scatter(x(post),y(post),'blue','filled');
-                    s.MarkerEdgeColor = 'black';
-                else
-                    s = scatter(x(post),y(post),'red','filled');
-                    s.MarkerEdgeColor = 'black';
-                end
-            end
-            hold on
-        end
-
-        gtitle = sprintf('G%d <%s>',z, GX_labels{z});
-        title(gtitle)
-        ylabel('y (um)');
-        xlabel('x (um)');
-    end
-
-    % Draw synaptic connections
-    for z = 1:4
-        subplot(2,2,z);
-        for pre = GX_id{z}.pre
-            for post = GX_id{z}.post
-                if (SX_con{z}(post,pre) ~= NONE)
-                    if strcmp(nt(pre),'FS')
-                        plot([x(pre) x(post)], [y(pre) y(post)],'blue');
-                    else
-                        plot([x(pre) x(post)], [y(pre) y(post)],'red');
-                    end                
-                end 
-                hold on
-            end
-        end
-    end
-    
 toc;
+end
