@@ -1,0 +1,15 @@
+# Objects and logs files
+*.o
+*.exe
+*.log
+*.jou
+
+# Data files
+*.mat
+
+# Software related files
+.vscode/
+py/__pycache__/
+
+# Project results
+*.csv
